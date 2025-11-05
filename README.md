@@ -1,49 +1,126 @@
-# Welcome to your Slot Swapper Project
-**Use your preferred IDE**
+## ✅ **Overview**
+SlotSwapper is a calendar-based time-slot management tool that enables users to **swap events with others** in a controlled, secure way.  
+Each user has calendar events, and they may mark some of them as *SWAPPABLE*. Other users can then browse available swappable slots and request an exchange.
+## ✅ **Key Features**
+### ✅ User Authentication (Supabase Auth)
+- Email login  
+- Auto-generated user profiles  
+- Protected routes  
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### ✅ Calendar Event Management
+- Create calendar events  
+- Mark event as **busy** or **swappable**  
+- Update or delete events  
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### ✅ Marketplace
+- Browse swappable time slots from other users  
+- View event details in card view  
 
-Follow these steps:
+### ✅ Swap Requests System
+- Send swap requests  
+- Incoming requests tab  
+- Outgoing/history tab  
+- Accept or reject swaps  
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+### ✅ Advanced Swap Logic (Server-side RPC)
+- Only `start_time` and `end_time` are swapped  
+- Event titles remain unchanged  
+- Full RLS security  
+- SQL functions with `SECURITY DEFINER`
+## ✅ **Technology Stack**
+### Frontend  
+- React + TypeScript  
+- Vite  
+- TailwindCSS  
+- shadcn/ui components  
+- React Router  
+- React Query  
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+### Backend  
+- Supabase  
+  - Auth  
+  - Database  
+  - Row Level Security  
+  - RPC Functions (`perform_swap`, `reject_swap`) 
+  
+---
 
-# Step 3: Install the necessary dependencies.
-npm i
+## ✅ **Setup & Installation**
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+### ✅ 1. Clone the repository
+```bash
+git clone https://github.com/your-username/SlotSwapper.git
+cd SlotSwapper
+npm install
+VITE_SUPABASE_URL=your_project_url
+VITE_SUPABASE_ANON_KEY=your_public_anon_key
 npm run dev
-```
 
-**Edit a file directly in GitHub**
+### ENVIRONMENT VARIABLES
+| Variable                 | Description                       |
+| ------------------------ | --------------------------------- |
+| `VITE_SUPABASE_URL`      | Your Supabase project URL         |
+| `VITE_SUPABASE_ANON_KEY` | Public anon key for client access |
+✅ API Endpoints (Supabase RPC + Queries)
+✅ Fetch User Events
+GET /events?user_id={id}
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+✅ Create Event
+POST /events
+{
+  title,
+  start_time,
+  end_time,
+  status
+}
 
-**Use GitHub Codespaces**
+✅ Mark Event Swappable
+PATCH /events/{id}
+{
+  status: "SWAPPABLE"
+}
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+✅ Fetch Marketplace Events
+GET /events?status=SWAPPABLE
 
-## What technologies are used for this project?
+✅ Create Swap Request
+POST /swap_requests
+{
+  requester_id,
+  target_user_id,
+  requester_slot_id,
+  target_slot_id
+}
 
-This project is built with:
+✅ Accept Swap (RPC)
+POST /rpc/perform_swap
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+✅ Reject Swap (RPC)
+POST /rpc/reject_swap
+✅ Challenges Faced
+✅ 1. Complex Supabase Relationship Mapping
 
-## Project URL:
-https://slot-swapper-three-beta.vercel.app/auth
+Supabase struggled with:
+
+duplicate requester columns
+
+ambiguous joins
+
+multi-table embedding
+
+✅ Solved by rewriting queries using lookup map merging.
+
+✅ 2. Row Level Security Blocking RPC Updates
+
+Supabase blocked event updates when swapping owners.
+✅ Fixed using SECURITY DEFINER SQL functions.
+
+✅ 3. Event Title Changing After Swap
+
+Originally React was fetching stale event data.
+✅ Fixed by adding timed re-fetch + correct mapping.
+
+✅ 4. State Crashes (White Screen)
+
+React crashed due to null EventCards.
+✅ Fixed with safety checks.
