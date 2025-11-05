@@ -46,3 +46,4 @@ This project is built with:
 - Tailwind CSS
 
 ## Project URL:
+https://slot-swapper-three-beta.vercel.app/auth
