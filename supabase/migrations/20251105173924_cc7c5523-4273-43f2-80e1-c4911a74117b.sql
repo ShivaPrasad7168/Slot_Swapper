@@ -60,6 +60,61 @@ CREATE POLICY "Users can update their own events"
   ON public.events FOR UPDATE
   USING (auth.uid() = user_id);
 
+-- Function to perform swap operation with proper permissions
+CREATE OR REPLACE FUNCTION public.perform_swap(
+  p_requester_slot_id UUID,
+  p_target_slot_id UUID,
+  p_requester_id UUID,
+  p_target_user_id UUID,
+  p_request_id UUID
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- Update requester's slot to target user
+  UPDATE public.events
+  SET user_id = p_target_user_id, status = 'BUSY'
+  WHERE id = p_requester_slot_id;
+
+  -- Update target's slot to requester
+  UPDATE public.events
+  SET user_id = p_requester_id, status = 'BUSY'
+  WHERE id = p_target_slot_id;
+
+  -- Update swap request status
+  UPDATE public.swap_requests
+  SET status = 'ACCEPTED'
+  WHERE id = p_request_id;
+END;
+$$;
+
+-- Function to reject swap
+CREATE OR REPLACE FUNCTION public.reject_swap(
+  p_requester_slot_id UUID,
+  p_target_slot_id UUID,
+  p_request_id UUID
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- Reset slots to swappable
+  UPDATE public.events
+  SET status = 'SWAPPABLE'
+  WHERE id IN (p_requester_slot_id, p_target_slot_id);
+
+  -- Update swap request status
+  UPDATE public.swap_requests
+  SET status = 'REJECTED'
+  WHERE id = p_request_id;
+END;
+$$;
+
 CREATE POLICY "Users can delete their own events"
   ON public.events FOR DELETE
   USING (auth.uid() = user_id);
@@ -92,21 +147,27 @@ CREATE POLICY "Target users can update swap requests"
   ON public.swap_requests FOR UPDATE
   USING (auth.uid() = target_user_id);
 
--- Function to handle new user signup
+-- ✅ FIXED FUNCTION: safer profile creation on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO public.profiles (id, name, email)
   VALUES (
     NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'name', 'User'),
+    COALESCE(
+      NEW.raw_user_meta_data->>'full_name',
+      NEW.raw_user_meta_data->>'name',
+      'User'
+    ),
     NEW.email
   );
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
--- Trigger for new user signup
+-- Re-create trigger for new user signup
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW

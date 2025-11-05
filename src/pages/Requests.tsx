@@ -9,14 +9,30 @@ import { Loader2, ArrowLeftRight } from "lucide-react";
 import { EventCard } from "@/components/EventCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+interface Profile {
+  id: string;
+  name: string;
+  email: string;
+}
+
+interface EventSlot {
+  id: string;
+  title: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+}
+
 interface SwapRequest {
   id: string;
   status: "PENDING" | "ACCEPTED" | "REJECTED";
   created_at: string;
-  requester_slot: any;
-  target_slot: any;
-  requester: any;
-  target_user: any;
+
+  requester: Profile | null;
+  target_user: Profile | null;
+
+  requester_slot: EventSlot | null;
+  target_slot: EventSlot | null;
 }
 
 export default function Requests() {
@@ -27,118 +43,109 @@ export default function Requests() {
 
   const fetchRequests = async () => {
     try {
-      // Fetch incoming requests
-      const { data: incoming, error: incomingError } = await supabase
+      const { data: requests, error: requestsError } = await supabase
         .from("swap_requests")
-        .select(`
-          *,
-          requester_slot:events!swap_requests_requester_slot_id_fkey(id, title, start_time, end_time, status),
-          target_slot:events!swap_requests_target_slot_id_fkey(id, title, start_time, end_time, status),
-          requester:profiles!swap_requests_requester_id_fkey(id, name, email),
-          target_user:profiles!swap_requests_target_user_id_fkey(id, name, email)
-        `)
-        .eq("target_user_id", user!.id)
-        .eq("status", "PENDING")
+        .select(
+          "id, status, created_at, requester_id, target_user_id, requester_slot_id, target_slot_id"
+        )
+        .or(`requester_id.eq.${user!.id},target_user_id.eq.${user!.id}`)
         .order("created_at", { ascending: false });
 
-      if (incomingError) throw incomingError;
+      if (requestsError) throw requestsError;
 
-      // Fetch outgoing requests
-      const { data: outgoing, error: outgoingError } = await supabase
-        .from("swap_requests")
-        .select(`
-          *,
-          requester_slot:events!swap_requests_requester_slot_id_fkey(id, title, start_time, end_time, status),
-          target_slot:events!swap_requests_target_slot_id_fkey(id, title, start_time, end_time, status),
-          requester:profiles!swap_requests_requester_id_fkey(id, name, email),
-          target_user:profiles!swap_requests_target_user_id_fkey(id, name, email)
-        `)
-        .eq("requester_id", user!.id)
-        .order("created_at", { ascending: false });
+      const userIds = new Set<string>();
+      const eventIds = new Set<string>();
 
-      if (outgoingError) throw outgoingError;
+      requests?.forEach((req) => {
+        if (req.requester_id) userIds.add(req.requester_id);
+        if (req.target_user_id) userIds.add(req.target_user_id);
+        if (req.requester_slot_id) eventIds.add(req.requester_slot_id);
+        if (req.target_slot_id) eventIds.add(req.target_slot_id);
+      });
 
-      setIncomingRequests(incoming || []);
-      setOutgoingRequests(outgoing || []);
-    } catch (error: any) {
-      toast.error(error.message || "Failed to fetch requests");
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, name, email")
+        .in("id", [...userIds]);
+
+      const { data: events } = await supabase
+        .from("events")
+        .select("id, title, start_time, end_time, status")
+        .in("id", [...eventIds]);
+
+      const profilesMap = new Map(profiles?.map((p) => [p.id, p]));
+      const eventsMap = new Map(events?.map((e) => [e.id, e]));
+
+      const formatted = requests?.map((req) => ({
+        id: req.id,
+        status: req.status,
+        created_at: req.created_at,
+        requester: profilesMap.get(req.requester_id) || null,
+        target_user: profilesMap.get(req.target_user_id) || null,
+        requester_slot: eventsMap.get(req.requester_slot_id) || null,
+        target_slot: eventsMap.get(req.target_slot_id) || null,
+      }));
+
+      const incoming = formatted.filter((r) => r.target_user?.id === user!.id);
+      const outgoing = formatted.filter((r) => r.requester?.id === user!.id);
+
+      setIncomingRequests(incoming);
+      setOutgoingRequests(outgoing);
+    } catch (err: any) {
+      toast.error(err.message);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchRequests();
+    if (user) fetchRequests();
   }, [user]);
 
   const handleResponse = async (requestId: string, accepted: boolean) => {
     try {
       const request = incomingRequests.find((r) => r.id === requestId);
       if (!request) return;
-
-      if (accepted) {
-        // Swap the user_id of both events
-        const { error: update1 } = await supabase
-          .from("events")
-          .update({ 
-            user_id: request.target_user.id,
-            status: "BUSY" 
-          })
-          .eq("id", request.requester_slot.id);
-
-        if (update1) throw update1;
-
-        const { error: update2 } = await supabase
-          .from("events")
-          .update({ 
-            user_id: request.requester.id,
-            status: "BUSY" 
-          })
-          .eq("id", request.target_slot.id);
-
-        if (update2) throw update2;
-
-        // Update swap request status
-        const { error: requestError } = await supabase
-          .from("swap_requests")
-          .update({ status: "ACCEPTED" })
-          .eq("id", requestId);
-
-        if (requestError) throw requestError;
-
-        toast.success("Swap accepted! Events have been exchanged.");
-      } else {
-        // Reject: Set both slots back to SWAPPABLE
-        const { error: update1 } = await supabase
-          .from("events")
-          .update({ status: "SWAPPABLE" })
-          .eq("id", request.requester_slot.id);
-
-        if (update1) throw update1;
-
-        const { error: update2 } = await supabase
-          .from("events")
-          .update({ status: "SWAPPABLE" })
-          .eq("id", request.target_slot.id);
-
-        if (update2) throw update2;
-
-        // Update swap request status
-        const { error: requestError } = await supabase
-          .from("swap_requests")
-          .update({ status: "REJECTED" })
-          .eq("id", requestId);
-
-        if (requestError) throw requestError;
-
-        toast.success("Swap request rejected");
+  
+      if (!request.requester || !request.target_user || !request.requester_slot || !request.target_slot) {
+        toast.error("Missing data in request");
+        return;
       }
-
-      fetchRequests();
-    } catch (error: any) {
-      toast.error(error.message || "Failed to process request");
+  
+      if (accepted) {
+        const { error } = await supabase.rpc("perform_swap", {
+          p_requester_slot_id: request.requester_slot.id,
+          p_target_slot_id: request.target_slot.id,
+          p_requester_id: request.requester.id,
+          p_target_user_id: request.target_user.id,
+          p_request_id: requestId,
+        });
+  
+        if (error) throw error;
+  
+        toast.success("✅ Swap accepted!");
+      } else {
+        const { error } = await supabase.rpc("reject_swap", {
+          p_requester_slot_id: request.requester_slot.id,
+          p_target_slot_id: request.target_slot.id,
+          p_request_id: requestId,
+        });
+  
+        if (error) throw error;
+  
+        toast.success("❌ Request rejected!");
+      }
+  
+      // ✅ IMPORTANT: Give supabase time to finish updates (titles, times, status)
+      setTimeout(() => {
+        fetchRequests();
+      }, 1200); // ✅ FIXES TITLE + STATUS SYNC
+  
+    } catch (err: any) {
+      toast.error(err.message);
     }
   };
+  
 
   if (loading) {
     return (
@@ -150,110 +157,103 @@ export default function Requests() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Swap Requests</h1>
-        <p className="text-muted-foreground">Manage your incoming and outgoing swap requests</p>
-      </div>
+      <h1 className="text-3xl font-bold">Swap Requests</h1>
 
       <Tabs defaultValue="incoming">
         <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="incoming">
-            Incoming ({incomingRequests.length})
-          </TabsTrigger>
-          <TabsTrigger value="outgoing">
-            Outgoing ({outgoingRequests.length})
-          </TabsTrigger>
+          <TabsTrigger value="incoming">Incoming</TabsTrigger>
+          <TabsTrigger value="outgoing">History</TabsTrigger>
         </TabsList>
 
+        {/* ✅ INCOMING — only pending have buttons */}
         <TabsContent value="incoming" className="space-y-4 mt-6">
           {incomingRequests.length === 0 ? (
-            <div className="text-center py-12 border-2 border-dashed rounded-lg">
-              <p className="text-muted-foreground">No incoming swap requests</p>
-            </div>
+            <div className="text-center py-12 border-2 border-dashed rounded-lg">No requests</div>
           ) : (
-            incomingRequests.map((request) => (
-              <Card key={request.id}>
+            incomingRequests.map((req) => (
+              <Card key={req.id}>
                 <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg">
-                      Swap Request from {request.requester.name}
-                    </CardTitle>
-                    <Badge variant="outline">Pending</Badge>
+                  <div className="flex justify-between">
+                    <CardTitle>From: {req.requester?.name}</CardTitle>
+                    {req.status === "PENDING" ? (
+                      <Badge variant="outline">PENDING</Badge>
+                    ) : req.status === "ACCEPTED" ? (
+                      <Badge className="bg-green-600">ACCEPTED</Badge>
+                    ) : (
+                      <Badge className="bg-red-600">REJECTED</Badge>
+                    )}
                   </div>
                 </CardHeader>
+
                 <CardContent className="space-y-4">
                   <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <p className="text-sm font-medium mb-2">They offer:</p>
-                      <EventCard event={request.requester_slot} showStatus={false} />
+                      <p className="text-sm mb-1">They Offer:</p>
+                      {req.requester_slot && <EventCard event={req.requester_slot} showStatus={false} />}
                     </div>
-                    <div className="flex items-center justify-center">
+
+                    <div className="flex justify-center items-center">
                       <ArrowLeftRight className="h-8 w-8 text-primary" />
                     </div>
+
                     <div>
-                      <p className="text-sm font-medium mb-2">For your:</p>
-                      <EventCard event={request.target_slot} showStatus={false} />
+                      <p className="text-sm mb-1">Your Slot:</p>
+                      {req.target_slot && <EventCard event={req.target_slot} showStatus={false} />}
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() => handleResponse(request.id, true)}
-                      className="flex-1"
-                    >
-                      Accept Swap
-                    </Button>
-                    <Button
-                      onClick={() => handleResponse(request.id, false)}
-                      variant="destructive"
-                      className="flex-1"
-                    >
-                      Reject
-                    </Button>
-                  </div>
+
+                  {/* ✅ Buttons only if pending */}
+                  {req.status === "PENDING" && (
+                    <div className="flex gap-2">
+                      <Button className="flex-1" onClick={() => handleResponse(req.id, true)}>
+                        Accept
+                      </Button>
+                      <Button className="flex-1" variant="destructive" onClick={() => handleResponse(req.id, false)}>
+                        Reject
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))
           )}
         </TabsContent>
 
+        {/* ✅ OUTGOING — full history, no buttons */}
         <TabsContent value="outgoing" className="space-y-4 mt-6">
           {outgoingRequests.length === 0 ? (
-            <div className="text-center py-12 border-2 border-dashed rounded-lg">
-              <p className="text-muted-foreground">No outgoing swap requests</p>
-            </div>
+            <div className="text-center py-12 border-2 border-dashed rounded-lg">No history</div>
           ) : (
-            outgoingRequests.map((request) => (
-              <Card key={request.id}>
+            outgoingRequests.map((req) => (
+              <Card key={req.id}>
                 <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg">
-                      Swap Request to {request.target_user.name}
-                    </CardTitle>
-                    <Badge
-                      className={
-                        request.status === "ACCEPTED"
-                          ? "bg-success text-success-foreground"
-                          : request.status === "REJECTED"
-                          ? "bg-destructive text-destructive-foreground"
-                          : ""
-                      }
-                    >
-                      {request.status}
-                    </Badge>
+                  <div className="flex justify-between">
+                    <CardTitle>To: {req.target_user?.name}</CardTitle>
+
+                    {req.status === "PENDING" ? (
+                      <Badge variant="outline">PENDING</Badge>
+                    ) : req.status === "ACCEPTED" ? (
+                      <Badge className="bg-green-600">ACCEPTED</Badge>
+                    ) : (
+                      <Badge className="bg-red-600">REJECTED</Badge>
+                    )}
                   </div>
                 </CardHeader>
+
                 <CardContent>
                   <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <p className="text-sm font-medium mb-2">You offered:</p>
-                      <EventCard event={request.requester_slot} showStatus={false} />
+                      <p className="text-sm mb-1">You Offered:</p>
+                      {req.requester_slot && <EventCard event={req.requester_slot} showStatus={false} />}
                     </div>
-                    <div className="flex items-center justify-center">
+
+                    <div className="flex justify-center items-center">
                       <ArrowLeftRight className="h-8 w-8 text-primary" />
                     </div>
+
                     <div>
-                      <p className="text-sm font-medium mb-2">For their:</p>
-                      <EventCard event={request.target_slot} showStatus={false} />
+                      <p className="text-sm mb-1">For Their Slot:</p>
+                      {req.target_slot && <EventCard event={req.target_slot} showStatus={false} />}
                     </div>
                   </div>
                 </CardContent>
