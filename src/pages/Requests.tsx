@@ -32,10 +32,10 @@ export default function Requests() {
         .from("swap_requests")
         .select(`
           *,
-          requester_slot:requester_slot_id(id, title, start_time, end_time, status),
-          target_slot:target_slot_id(id, title, start_time, end_time, status),
-          requester:requester_id(id, name, email),
-          target_user:target_user_id(id, name, email)
+          requester_slot:events!swap_requests_requester_slot_id_fkey(id, title, start_time, end_time, status),
+          target_slot:events!swap_requests_target_slot_id_fkey(id, title, start_time, end_time, status),
+          requester:profiles!swap_requests_requester_id_fkey(id, name, email),
+          target_user:profiles!swap_requests_target_user_id_fkey(id, name, email)
         `)
         .eq("target_user_id", user!.id)
         .eq("status", "PENDING")
@@ -48,10 +48,10 @@ export default function Requests() {
         .from("swap_requests")
         .select(`
           *,
-          requester_slot:requester_slot_id(id, title, start_time, end_time, status),
-          target_slot:target_slot_id(id, title, start_time, end_time, status),
-          requester:requester_id(id, name, email),
-          target_user:target_user_id(id, name, email)
+          requester_slot:events!swap_requests_requester_slot_id_fkey(id, title, start_time, end_time, status),
+          target_slot:events!swap_requests_target_slot_id_fkey(id, title, start_time, end_time, status),
+          requester:profiles!swap_requests_requester_id_fkey(id, name, email),
+          target_user:profiles!swap_requests_target_user_id_fkey(id, name, email)
         `)
         .eq("requester_id", user!.id)
         .order("created_at", { ascending: false });
